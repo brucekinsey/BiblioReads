@@ -14,6 +14,14 @@ const BookScraper = async (req, res) => {
       });
       const htmlString = await response.text();
       const $ = cheerio.load(htmlString);
+      // fun stuff found in a script block at the top of the page
+      const scriptData1 = JSON.parse($('script[type="application/ld+json"]').html());
+      const scriptData2 = JSON.parse($('script#__NEXT_DATA__[type="application/json"]').html()).props.pageProps.apolloState;
+      delete scriptData2["ROOT_QUERY"];
+      //delete scriptData2. .stats.textReviewsLanguageCounts
+      Array.from(Object.keys(scriptData2))
+	.filter(e => (new RegExp("User|Review","i")).test(e))
+	.forEach(e => delete scriptData2[e]);
       const cover = $(".ResponsiveImage").attr("src");
       const series = $("h3.Text__italic").text();
       const seriesURL = $("h3.Text__italic > a").attr("href");
@@ -42,6 +50,8 @@ const BookScraper = async (req, res) => {
         .map((i, el) => $(el).find("span").text().replace("Genres", ""))
         .get();
       const bookEdition = $('[data-testid="pagesFormat"]').text();
+      // added language from page load
+      //const bookLanguage = scriptData.inLanguage;
       const publishDate = $('[data-testid="publicationInfo"]').text();
       const related = $("div.DynamicCarousel__itemsArea > div > div")
         .map((i, el) => {
@@ -174,8 +184,11 @@ const BookScraper = async (req, res) => {
       return res.json({
         status: "Received",
         statusCode: res.statusCode,
+        scriptData1: scriptData1,
+	scriptData2: scriptData2,
         source: "https://github.com/nesaku/biblioreads",
         scrapeURL: scrapeURL,
+	bookLanguage: scriptData1.inLanguage,
         cover: cover,
         series: series,
         seriesURL: seriesURL,
