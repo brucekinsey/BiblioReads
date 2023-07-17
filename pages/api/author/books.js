@@ -1,11 +1,11 @@
 const cheerio = require("cheerio");
 
-const ListScraper = async (req, res) => {
+const BooksScraper = async (req, res) => {
   if (req.method === "POST") {
-    // URL might be a redirect
-    const scrapeURL = req.body.queryURL
-      .split("&")[0]
-      .replace("https://", "http://");
+    // The default sort is by popularity
+    // Use the URL parameter "per_page" to get 100 instead of the default 30 books
+    const scrapeURL =
+      req.body.queryURL.split("&")[0] + `?page=${req.body.page}&per_page=100`;
     try {
       const response = await fetch(`${scrapeURL}`, {
         method: "GET",
@@ -18,14 +18,19 @@ const ListScraper = async (req, res) => {
 
       const htmlString = await response.text();
       const $ = cheerio.load(htmlString);
-      const title = $("div.leftContainer > h1").text();
-      const desc = $("div.u-paddingBottomMedium.mediumText").html();
+      const title = $("div.mainContentFloat > h1").text();
+      /*       
+      const author = $("div.leftContainer > div > a.authorName").text();
+      const authorURL = $("div.leftContainer > div > a.authorName").attr(
+        "href"
+      );
+      const authorIMG = $("div.leftContainer > a > img").attr("src"); 
+      */
+      const desc = $("div.leftContainer > div:nth-child(2)").text();
       const books = $("tbody > tr")
         .map((i, el) => {
           const $el = $(el);
-          const cover = $el
-            .find("td > div.js-tooltipTrigger.tooltipTrigger > a > img")
-            .attr("src");
+          const cover = $el.find("td > a > img.bookCover").attr("src");
           const title = $el.find("td > a > span").text();
           const bookURL = $el.find("td > a").attr("href");
           const author = $el
@@ -49,7 +54,12 @@ const ListScraper = async (req, res) => {
           };
         })
         .toArray();
-
+      const previousPage = $(
+        "div.leftContainer > div[style='float: right'] > div > a.previous_page"
+      ).attr("href");
+      const nextPage = $(
+        "div.leftContainer > div[style='float: right'] > div > a.next_page"
+      ).attr("href");
       const lastScraped = new Date().toISOString();
       res.statusCode = 200;
       return res.json({
@@ -59,6 +69,8 @@ const ListScraper = async (req, res) => {
         title: title,
         desc: desc,
         books: books,
+        previousPage: previousPage,
+        nextPage: nextPage,
         lastScraped: lastScraped,
       });
     } catch (error) {
@@ -77,4 +89,4 @@ const ListScraper = async (req, res) => {
   }
 };
 
-export default ListScraper;
+export default BooksScraper;
