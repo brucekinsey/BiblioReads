@@ -8,25 +8,68 @@ const BookScraper = async (req, res) => {
         method: "GET",
         headers: new Headers({
           "User-Agent":
-            process.env.NEXT_PUBLIC_USER_AGENT ||
+            process.env.NEXT_PUBLIC_USER_aAGENT ||
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
         }),
       });
       const htmlString = await response.text();
       const $ = cheerio.load(htmlString);
-      // fun stuff found in a script block at the top of the page
-      const scriptData1 = JSON.parse($('script[type="application/ld+json"]').html());
-      const scriptData2 = JSON.parse($('script#__NEXT_DATA__[type="application/json"]').html()).props.pageProps.apolloState;
-      delete scriptData2["ROOT_QUERY"];
-      //delete scriptData2. .stats.textReviewsLanguageCounts
-      Array.from(Object.keys(scriptData2))
-	.filter(e => (new RegExp("User|Review","i")).test(e))
-	.forEach(e => delete scriptData2[e]);
-      const cover = $(".ResponsiveImage").attr("src");
+      // Adding script data scraped from page
+      const scriptData = JSON.parse($('script#__NEXT_DATA__[type="application/json"]').html()).props.pageProps.apolloState;
+        // Renaming properties in scriptData
+        // It's probably computationally faster to just assign them to a new variable
+        Array.from(Object.keys(scriptData)).forEach( e =>
+          {
+            /*
+            // was used to clean up scriptData for readability
+            e.toLowerCase().startsWith('root_query') ?
+              delete scriptData[e] :
+            e.toLowerCase().startsWith('user') ? 
+              delete scriptData[e] :
+            e.toLowerCase().startsWith('review') ?
+              delete scriptData[e] :
+            */
+            e.toLowerCase().startsWith('work') ?
+              (
+                delete Object.assign(scriptData, { 'Work': scriptData[e] })[e],
+                // delete scriptData['Work']['stats']['textReviewsLanguageCounts'],
+                Array.from(Object.keys(scriptData['Work'])).forEach(e =>
+                  {
+                    e.toLowerCase().startsWith("quotes({") ?
+                      delete Object.assign(scriptData['Work'], { 'quotes': scriptData['Work'][e] })[e] :
+                    e.toLowerCase().startsWith("questions({") ?
+                      delete Object.assign(scriptData['Work'], { 'questions': scriptData['Work'][e] })[e] :
+                    e.toLowerCase().startsWith("topics({") ?
+                      delete Object.assign(scriptData['Work'], { 'topics': scriptData['Work'][e] })[e] : null;
+                  }
+                )
+              ) :
+            e.toLowerCase().startsWith('series') ?
+                delete Object.assign(scriptData, { 'Series': scriptData[e] })[e] :
+            e.toLowerCase().startsWith('book') ?
+              (
+                delete Object.assign(scriptData, { 'Book': scriptData[e] })[e]
+                //, delete scriptData['Book']["links({})"]
+              ) : null;
+          }
+        );
+      const grBook = scriptData['Book'];
+      const grSeries = scriptData['Series'];
+      const grWork = scriptData['Work'];
+
+      //const cover = $(".ResponsiveImage").attr("src");
+      const cover = grBook['imageUrl'];
+
       const series = $("h3.Text__italic").text();
+      /*
       const seriesURL = $("h3.Text__italic > a").attr("href");
       const workURL = $('meta[property="og:url"]').attr("content");
       const title = $('h1[data-testid="bookTitle"]').text();
+      */
+      const seriesURL = grSeries['webUrl'];
+      const workURL = grWork['details']['webUrl'];
+      const title = grBook["title"];
+
       const author = $(".ContributorLinksList > span > a")
         .map((i, el) => {
           const $el = $(el);
@@ -40,19 +83,31 @@ const BookScraper = async (req, res) => {
           };
         })
         .toArray();
+      
+      /*
       const rating = $("div.RatingStatistics__rating").text().slice(0, 4);
       const ratingCount = $('[data-testid="ratingsCount"]')
         .text()
         .split("rating")[0];
+      
       const reviewsCount = $('[data-testid="reviewsCount"]').text();
       const desc = $('[data-testid="description"]').text();
       const genres = $('[data-testid="genresList"] > ul > span > span')
         .map((i, el) => $(el).find("span").text().replace("Genres", ""))
         .get();
+      */
+      
+      const rating = grWork['stats']['averageRating'].toString();
+      const ratingCount = grWork['stats']["ratingsCount"].toLocaleString() + " ";
+      const reviewsCount = grWork['stats']["textReviewsCount"].toLocaleString() + " ";
+      const desc = grBook["description({\"stripped\":true})"];
+      const genres = grBook['bookGenres'].map(e => {return e.genre.name});
+      
       const bookEdition = $('[data-testid="pagesFormat"]').text();
-      // added language from page load
-      //const bookLanguage = scriptData.inLanguage;
-      const publishDate = $('[data-testid="publicationInfo"]').text();
+      const bookLanguage = grBook["details"]["language"]["name"]
+      //const publishDate = $('[data-testid="publicationInfo"]').text();
+      const publishDate = (new Date(grWork['details']['publicationTime']))
+        .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
       const related = $("div.DynamicCarousel__itemsArea > div > div")
         .map((i, el) => {
           const $el = $(el);
@@ -80,6 +135,7 @@ const BookScraper = async (req, res) => {
         })
         .toArray();
 
+      /*
       const rating5 = $(
         ".ReviewsSectionStatistics__histogram > div > div:nth-child(1) > div:nth-child(3)"
       )
@@ -112,13 +168,15 @@ const BookScraper = async (req, res) => {
         .text()
         .split("(")[0]
         .replace(" ", "");
+      */
+      const [rating1, rating2, rating3, rating4, rating5] = grWork["stats"]["ratingsCountDist"];
 
       const reviewBreakdown = {
-        rating5: rating5,
-        rating4: rating4,
-        rating3: rating3,
-        rating2: rating2,
-        rating1: rating1,
+        rating5: rating5.toLocaleString(),
+        rating4: rating4.toLocaleString(),
+        rating3: rating3.toLocaleString(),
+        rating2: rating2.toLocaleString(),
+        rating1: rating1.toLocaleString(),
       };
 
       const reviews = $(".ReviewsList > div:nth-child(2) > div")
@@ -163,6 +221,7 @@ const BookScraper = async (req, res) => {
         })
         .toArray();
 
+      /*
       const quotes = $(
         "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(1) > div.DiscussionCard__middle > div.DiscussionCard__stats"
       ).text();
@@ -176,19 +235,23 @@ const BookScraper = async (req, res) => {
       const questionsURL = $(
         "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(3)"
       ).attr("href");
+      */
+
       const lastScraped = new Date().toISOString();
       {
         title === "" ? (res.statusCode = 504) : (res.statusCode = 200);
       }
+      
+      const quotes = grWork["quotes"]["totalCount"].toString();
+      const quotesURL = grWork["quotes"]["webUrl"];
+      const questions = grWork["questions"]["totalCount"].toString();
+      const questionsURL = grWork["questions"]["webUrl"];
 
       return res.json({
         status: "Received",
         statusCode: res.statusCode,
-        scriptData1: scriptData1,
-	scriptData2: scriptData2,
         source: "https://github.com/nesaku/biblioreads",
         scrapeURL: scrapeURL,
-	bookLanguage: scriptData1.inLanguage,
         cover: cover,
         series: series,
         seriesURL: seriesURL,
