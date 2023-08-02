@@ -14,15 +14,16 @@ const BookScraper = async (req, res) => {
       });
       const responseStatus = await response.status;
       const htmlString = await response.text();
-      console.log(responseStatus);
+      // Uncomment below for development
+      // console.log(responseStatus);
       const $ = cheerio.load(htmlString);
 
       // Adding script data scraped from page
       const scriptData = JSON.parse($('script#__NEXT_DATA__[type="application/json"]').html()).props.pageProps.apolloState;
+      
       // if it's not ready, i.e. page has a <title>Loading interface...</title>,
       // return 504 b/c the page isn't finished loading
       if(Object.keys(scriptData).length === 0){
-        //console.log("not yet");
         res.statusCode = 504;
         return res.json({
           status: "Processing Query",
@@ -36,38 +37,24 @@ const BookScraper = async (req, res) => {
 
       Array.from(Object.keys(scriptData)).forEach( e =>
         {
-          //e.toLowerCase().startsWith('work') ?
-          //e.match(/^work:/gi) !== null ?
           e.toLowerCase().indexOf('work:') >= 0 ?
             (
               delete Object.assign(scriptData, { 'Work': scriptData[e] })[e],
               Array.from(Object.keys(scriptData['Work'])).forEach(e =>
                 {
-                  //e.toLowerCase().startsWith("quotes({") ?
-                  //e.match(/^quotes\(\{/gi) !== null ?
                   e.toLowerCase().indexOf('quotes({') >= 0 ?
                     delete Object.assign(scriptData['Work'], { 'quotes': scriptData['Work'][e] })[e] :
-                  //e.toLowerCase().startsWith("questions({") ?
-                  //e.match(/^questions\(\{/gi) !== null ?
                   e.toLowerCase().indexOf('questions({') >= 0 ?
                     delete Object.assign(scriptData['Work'], { 'questions': scriptData['Work'][e] })[e] :
-                  //e.toLowerCase().startsWith("topics({") ?
-                  //e.match(/^topics\(\{/gi) !== null ?
                   e.toLowerCase().indexOf('topics({') >= 0 ?
                     delete Object.assign(scriptData['Work'], { 'topics': scriptData['Work'][e] })[e] : null;
                 }
               )
             ) :
-          //e.toLowerCase().startsWith('series') ?
-          //e.match(/^series:/gi) !== null ?
           e.toLowerCase().indexOf('series:') >= 0 ?
             delete Object.assign(scriptData, { 'Series': scriptData[e] })[e] :
-          //e.toLowerCase().startsWith('book') ?
-          //e.match(/^book:/gi) !== null ?
           e.toLowerCase().indexOf('book:') >= 0 ?
             delete Object.assign(scriptData, { 'Book': scriptData[e] })[e] :
-          //e.toLowerCase().startsWith('review:') ?
-          //e.match(/^review:/gi) !== null ?
           e.toLowerCase().indexOf('review:') >= 0 ?
             reviewArray.push(scriptData[e]) :
           null;
@@ -91,18 +78,18 @@ const BookScraper = async (req, res) => {
 
       const workURL         = grWork['details']['webUrl'];
       const publishDate     = new Date(grWork['details']['publicationTime'])
-        .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
+                                .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
       const rating          = grWork['stats']['averageRating'].toString();
       const ratingCount     = grWork['stats']["ratingsCount"].toLocaleString() + " ";
       const reviewsCount    = grWork['stats']["textReviewsCount"].toLocaleString() + " reviews";
       const [rating1, rating2, rating3, rating4, rating5] = grWork["stats"]["ratingsCountDist"];
       const reviewBreakdown = {
-        rating5: rating5.toLocaleString(),
-        rating4: rating4.toLocaleString(),
-        rating3: rating3.toLocaleString(),
-        rating2: rating2.toLocaleString(),
-        rating1: rating1.toLocaleString(),
-      };
+                                rating5: rating5.toLocaleString(),
+                                rating4: rating4.toLocaleString(),
+                                rating3: rating3.toLocaleString(),
+                                rating2: rating2.toLocaleString(),
+                                rating1: rating1.toLocaleString(),
+                              };
       const questions       = grWork["questions"]["totalCount"].toString();
       const questionsURL    = grWork["questions"]["webUrl"];
       const quotes          = grWork["quotes"]["totalCount"].toString();
@@ -132,7 +119,8 @@ const BookScraper = async (req, res) => {
         return returnValue;
       });
 
-      // Existing const declarations, have not yet used the above, though the data is present
+      // Existing const declarations from @nesaku's code, have not yet moved scraping it from the JSON, though the data is present
+      // Undecided if I'll leave it in place or not -BK
       const series = $("h3.Text__italic").text();
       const author = $(".ContributorLinksList > span > a")
         .map((i, el) => {
@@ -147,7 +135,6 @@ const BookScraper = async (req, res) => {
           };
         })
         .toArray();
-      //const bookEdition = $('[data-testid="pagesFormat"]').text();
       const related = $("div.DynamicCarousel__itemsArea > div > div")
         .map((i, el) => {
           const $el = $(el);
@@ -174,50 +161,6 @@ const BookScraper = async (req, res) => {
           };
         })
         .toArray();
-
-      /*
-      const reviews = $(".ReviewsList > div:nth-child(2) > div")
-        .filter(Boolean)
-        .map((i, el) => {
-          const $el = $(el);
-          const image = $el
-            .find("div > article > div > div > section > a > img")
-            .attr("src");
-          const author = $el
-            .find(
-              "div > article > div > div > section:nth-child(2) > span:nth-child(1) > div > a"
-            )
-            .text();
-          const date = $el
-            .find("div > article > section > section:nth-child(1) > span > a")
-            .text();
-          const stars = $el
-            .find("div > article > section > section:nth-child(1) > div > span")
-            .attr("aria-label");
-          const text = $el
-            .find(
-              "div > article > section > section:nth-child(2) > section > div > div > span"
-            )
-            .html();
-          const likes = $el
-            .find(
-              "div > article > section > footer > div > div:nth-child(1) > button > span"
-            )
-            .text();
-          const id = i + 1;
-
-          return {
-            id: id,
-            image: image,
-            author: author,
-            date: date,
-            stars: stars,
-            text: text,
-            likes: likes,
-          };
-        })
-        .toArray();
-      */
 
       const lastScraped = new Date().toISOString();
       {
