@@ -8,68 +8,132 @@ const BookScraper = async (req, res) => {
         method: "GET",
         headers: new Headers({
           "User-Agent":
-            process.env.NEXT_PUBLIC_USER_aAGENT ||
+            process.env.NEXT_PUBLIC_USER_AGENT ||
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
         }),
       });
+      const responseStatus = await response.status;
       const htmlString = await response.text();
+      console.log(responseStatus);
       const $ = cheerio.load(htmlString);
+
       // Adding script data scraped from page
       const scriptData = JSON.parse($('script#__NEXT_DATA__[type="application/json"]').html()).props.pageProps.apolloState;
-        // Renaming properties in scriptData
-        // It's probably computationally faster to just assign them to a new variable
-        Array.from(Object.keys(scriptData)).forEach( e =>
-          {
-            /*
-            // was used to clean up scriptData for readability
-            e.toLowerCase().startsWith('root_query') ?
-              delete scriptData[e] :
-            e.toLowerCase().startsWith('user') ? 
-              delete scriptData[e] :
-            e.toLowerCase().startsWith('review') ?
-              delete scriptData[e] :
-            */
-            e.toLowerCase().startsWith('work') ?
-              (
-                delete Object.assign(scriptData, { 'Work': scriptData[e] })[e],
-                // delete scriptData['Work']['stats']['textReviewsLanguageCounts'],
-                Array.from(Object.keys(scriptData['Work'])).forEach(e =>
-                  {
-                    e.toLowerCase().startsWith("quotes({") ?
-                      delete Object.assign(scriptData['Work'], { 'quotes': scriptData['Work'][e] })[e] :
-                    e.toLowerCase().startsWith("questions({") ?
-                      delete Object.assign(scriptData['Work'], { 'questions': scriptData['Work'][e] })[e] :
-                    e.toLowerCase().startsWith("topics({") ?
-                      delete Object.assign(scriptData['Work'], { 'topics': scriptData['Work'][e] })[e] : null;
-                  }
-                )
-              ) :
-            e.toLowerCase().startsWith('series') ?
-                delete Object.assign(scriptData, { 'Series': scriptData[e] })[e] :
-            e.toLowerCase().startsWith('book') ?
-              (
-                delete Object.assign(scriptData, { 'Book': scriptData[e] })[e]
-                //, delete scriptData['Book']["links({})"]
-              ) : null;
-          }
-        );
-      const grBook = scriptData['Book'];
-      const grSeries = scriptData['Series'];
-      const grWork = scriptData['Work'];
+      // if it's not ready, i.e. page has a <title>Loading interface...</title>,
+      // return 504 b/c the page isn't finished loading
+      if(Object.keys(scriptData).length === 0){
+        //console.log("not yet");
+        res.statusCode = 504;
+        return res.json({
+          status: "Processing Query",
+          scrapeURL: scrapeURL,
+        });
+      }
 
-      //const cover = $(".ResponsiveImage").attr("src");
-      const cover = grBook['imageUrl'];
+      // Now that it's loaded, renaming properties in scriptData
+      // It's probably computationally faster to just assign them to a new variable
+      const reviewArray = [];
 
+      Array.from(Object.keys(scriptData)).forEach( e =>
+        {
+          //e.toLowerCase().startsWith('work') ?
+          //e.match(/^work:/gi) !== null ?
+          e.toLowerCase().indexOf('work:') >= 0 ?
+            (
+              delete Object.assign(scriptData, { 'Work': scriptData[e] })[e],
+              Array.from(Object.keys(scriptData['Work'])).forEach(e =>
+                {
+                  //e.toLowerCase().startsWith("quotes({") ?
+                  //e.match(/^quotes\(\{/gi) !== null ?
+                  e.toLowerCase().indexOf('quotes({') >= 0 ?
+                    delete Object.assign(scriptData['Work'], { 'quotes': scriptData['Work'][e] })[e] :
+                  //e.toLowerCase().startsWith("questions({") ?
+                  //e.match(/^questions\(\{/gi) !== null ?
+                  e.toLowerCase().indexOf('questions({') >= 0 ?
+                    delete Object.assign(scriptData['Work'], { 'questions': scriptData['Work'][e] })[e] :
+                  //e.toLowerCase().startsWith("topics({") ?
+                  //e.match(/^topics\(\{/gi) !== null ?
+                  e.toLowerCase().indexOf('topics({') >= 0 ?
+                    delete Object.assign(scriptData['Work'], { 'topics': scriptData['Work'][e] })[e] : null;
+                }
+              )
+            ) :
+          //e.toLowerCase().startsWith('series') ?
+          //e.match(/^series:/gi) !== null ?
+          e.toLowerCase().indexOf('series:') >= 0 ?
+            delete Object.assign(scriptData, { 'Series': scriptData[e] })[e] :
+          //e.toLowerCase().startsWith('book') ?
+          //e.match(/^book:/gi) !== null ?
+          e.toLowerCase().indexOf('book:') >= 0 ?
+            delete Object.assign(scriptData, { 'Book': scriptData[e] })[e] :
+          //e.toLowerCase().startsWith('review:') ?
+          //e.match(/^review:/gi) !== null ?
+          e.toLowerCase().indexOf('review:') >= 0 ?
+            reviewArray.push(scriptData[e]) :
+          null;
+        }
+      );
+
+      // For readability...
+      const grBook          = scriptData['Book'];
+      const grSeries        = scriptData['Series'] ? scriptData['Series'] : {"webUrl": ""};
+      const grWork          = scriptData['Work'];
+
+      // Placed in order of order by variable and 1st level property
+      const cover           = grBook['imageUrl'];
+      const desc            = grBook["description({\"stripped\":true})"];
+      const genres          = grBook['bookGenres'].map(e => {return e.genre.name});
+      const bookLanguage    = grBook["details"]["language"]["name"]
+      const bookEdition     = grBook["details"]["numPages"].toLocaleString() + " pages, " + grBook["details"]["format"];
+      const title           = grBook["title"];
+
+      const seriesURL       = grSeries['webUrl'];
+
+      const workURL         = grWork['details']['webUrl'];
+      const publishDate     = new Date(grWork['details']['publicationTime'])
+        .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
+      const rating          = grWork['stats']['averageRating'].toString();
+      const ratingCount     = grWork['stats']["ratingsCount"].toLocaleString() + " ";
+      const reviewsCount    = grWork['stats']["textReviewsCount"].toLocaleString() + " reviews";
+      const [rating1, rating2, rating3, rating4, rating5] = grWork["stats"]["ratingsCountDist"];
+      const reviewBreakdown = {
+        rating5: rating5.toLocaleString(),
+        rating4: rating4.toLocaleString(),
+        rating3: rating3.toLocaleString(),
+        rating2: rating2.toLocaleString(),
+        rating1: rating1.toLocaleString(),
+      };
+      const questions       = grWork["questions"]["totalCount"].toString();
+      const questionsURL    = grWork["questions"]["webUrl"];
+      const quotes          = grWork["quotes"]["totalCount"].toString();
+      const quotesURL       = grWork["quotes"]["webUrl"];
+
+      const reviews = reviewArray.map((e, i) => {
+        const reviewData = e;
+        const userId = e['creator']['__ref'];
+        const userData = scriptData[userId];
+        const author = userData.name;
+        const image = userData.imageUrlSquare !== undefined ? userData.imageUrlSquare : null ;
+        const text = reviewData["text"].toString();
+        const date = new Date(reviewData.lastRevisionAt)
+          .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
+        const stars = "Rating " + reviewData["rating"].toString() + " out of 5";
+        const likes = reviewData["likeCount"].toLocaleString() + " likes";
+        const id = i + 1;
+        const returnValue = {
+          id: id,
+          image: image,
+          author: author,
+          date: date,
+          stars: stars,
+          text: text,
+          likes: likes,
+        };
+        return returnValue;
+      });
+
+      // Existing const declarations, have not yet used the above, though the data is present
       const series = $("h3.Text__italic").text();
-      /*
-      const seriesURL = $("h3.Text__italic > a").attr("href");
-      const workURL = $('meta[property="og:url"]').attr("content");
-      const title = $('h1[data-testid="bookTitle"]').text();
-      */
-      const seriesURL = grSeries['webUrl'];
-      const workURL = grWork['details']['webUrl'];
-      const title = grBook["title"];
-
       const author = $(".ContributorLinksList > span > a")
         .map((i, el) => {
           const $el = $(el);
@@ -83,31 +147,7 @@ const BookScraper = async (req, res) => {
           };
         })
         .toArray();
-      
-      /*
-      const rating = $("div.RatingStatistics__rating").text().slice(0, 4);
-      const ratingCount = $('[data-testid="ratingsCount"]')
-        .text()
-        .split("rating")[0];
-      
-      const reviewsCount = $('[data-testid="reviewsCount"]').text();
-      const desc = $('[data-testid="description"]').text();
-      const genres = $('[data-testid="genresList"] > ul > span > span')
-        .map((i, el) => $(el).find("span").text().replace("Genres", ""))
-        .get();
-      */
-      
-      const rating = grWork['stats']['averageRating'].toString();
-      const ratingCount = grWork['stats']["ratingsCount"].toLocaleString() + " ";
-      const reviewsCount = grWork['stats']["textReviewsCount"].toLocaleString() + " ";
-      const desc = grBook["description({\"stripped\":true})"];
-      const genres = grBook['bookGenres'].map(e => {return e.genre.name});
-      
-      const bookEdition = $('[data-testid="pagesFormat"]').text();
-      const bookLanguage = grBook["details"]["language"]["name"]
-      //const publishDate = $('[data-testid="publicationInfo"]').text();
-      const publishDate = (new Date(grWork['details']['publicationTime']))
-        .toLocaleDateString(undefined,{ year: 'numeric', month: 'long', day: 'numeric' });
+      //const bookEdition = $('[data-testid="pagesFormat"]').text();
       const related = $("div.DynamicCarousel__itemsArea > div > div")
         .map((i, el) => {
           const $el = $(el);
@@ -136,49 +176,6 @@ const BookScraper = async (req, res) => {
         .toArray();
 
       /*
-      const rating5 = $(
-        ".ReviewsSectionStatistics__histogram > div > div:nth-child(1) > div:nth-child(3)"
-      )
-        .text()
-        .split("(")[0]
-        .replace(" ", "");
-      const rating4 = $(
-        ".ReviewsSectionStatistics__histogram > div > div:nth-child(2) > div:nth-child(3)"
-      )
-        .text()
-        .split("(")[0]
-        .replace(" ", "");
-      const rating3 = $(
-        ".ReviewsSectionStatistics__histogram > div > div:nth-child(3) > div:nth-child(3)"
-      )
-        .text()
-        .split("(")[0]
-        .replace(" ", "");
-
-      const rating2 = $(
-        ".ReviewsSectionStatistics__histogram > div > div:nth-child(4) > div:nth-child(3)"
-      )
-        .text()
-        .split("(")[0]
-        .replace(" ", "");
-
-      const rating1 = $(
-        ".ReviewsSectionStatistics__histogram > div > div:nth-child(5) > div:nth-child(3)"
-      )
-        .text()
-        .split("(")[0]
-        .replace(" ", "");
-      */
-      const [rating1, rating2, rating3, rating4, rating5] = grWork["stats"]["ratingsCountDist"];
-
-      const reviewBreakdown = {
-        rating5: rating5.toLocaleString(),
-        rating4: rating4.toLocaleString(),
-        rating3: rating3.toLocaleString(),
-        rating2: rating2.toLocaleString(),
-        rating1: rating1.toLocaleString(),
-      };
-
       const reviews = $(".ReviewsList > div:nth-child(2) > div")
         .filter(Boolean)
         .map((i, el) => {
@@ -220,21 +217,6 @@ const BookScraper = async (req, res) => {
           };
         })
         .toArray();
-
-      /*
-      const quotes = $(
-        "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(1) > div.DiscussionCard__middle > div.DiscussionCard__stats"
-      ).text();
-      const quotesURL = $(
-        "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(1)"
-      ).attr("href");
-
-      const questions = $(
-        "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(3) > div.DiscussionCard__middle > div.DiscussionCard__stats"
-      ).text();
-      const questionsURL = $(
-        "div.BookDiscussions > div.BookDiscussions__list > a.DiscussionCard:nth-child(3)"
-      ).attr("href");
       */
 
       const lastScraped = new Date().toISOString();
@@ -242,11 +224,6 @@ const BookScraper = async (req, res) => {
         title === "" ? (res.statusCode = 504) : (res.statusCode = 200);
       }
       
-      const quotes = grWork["quotes"]["totalCount"].toString();
-      const quotesURL = grWork["quotes"]["webUrl"];
-      const questions = grWork["questions"]["totalCount"].toString();
-      const questionsURL = grWork["questions"]["webUrl"];
-
       return res.json({
         status: "Received",
         statusCode: res.statusCode,
@@ -277,6 +254,7 @@ const BookScraper = async (req, res) => {
     } catch (error) {
       res.statusCode = 404;
       console.error("An Error Has Occurred");
+      console.error(error.toString());
       return res.json({
         status: "Error - Invalid Query",
         scrapeURL: scrapeURL,
